@@ -1,0 +1,444 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TZack88
+
+//@version=5
+
+strategy('Silver RMI Trend only sell', overlay=true,format=format.price,default_qty_type=strategy.cash,default_qty_value=100, pyramiding=6, initial_capital = 10000)
+
+t1 ="value for 3M = 12,   for 5M = 17,    for 15M = 16,    for 60M = 21"
+t2 ="value for 3M = 55,   for 5M = 70,    for 15M = 75,    for 60M = 57.8"
+t3 ="value for 3M = 21,   for 5M = 21,    for 15M = 22,    for 60M = 20.8"
+t4 ="increase percentage as the time scale increases"
+t5 ="PERCT is the favorite"
+t8 ="The buy operation will NOT occur if this value is exceeded "
+t9 ="On = partial profit taking, Off = take all profits when closing the trade "  
+
+// ** ---> Inputs ------------- {
+var bool positive           = false
+var bool negative           = false
+string RSI_group            = "RMI Settings"
+string mom_group            = "Range Vales"
+string visual               = "Visuals" 
+int Length                  = input(21,"RMI Length ",inline = "RMI",group = RSI_group)
+int pmom                    = input(76," Positive above",inline = "rsi1",group =RSI_group )
+int nmom                    = input(22,"Negative below",inline = "rsi2",group =RSI_group )
+bool filleshow              = input(true,"Show Range MA ",inline = "002",group =visual )
+color bullc                 = input(#00bcd4,"",inline = "002",group =visual )
+color bearc                 = input(#ff5252,"",inline = "002",group =visual )
+float BarRange              = high - low
+
+percentDeviation            = input.float(2, step=0.01, title="Percentage Deviation Per Channel", group="Deviation of MA, TakeProfit" )/100
+src3                        = input(hlcc4, title='Source', group="Deviation of MA, TakeProfit")
+mav3                        = input.string(title='Moving Average Type', defval='PERCT', options=['SMA', 'EMA', 'WMA', 'TMA', 'VWMA', 'VWAP', 'HMA', 'ALMA', "SUPERTREND", "SUPERTREND1", "SUPERTREND2", "SUPERTREND EX", "LAB", "PERCT" ], group="Deviation of MA, TakeProfit")
+length3                     = input.int(10, 'Moving Average Length', minval=1 , group="Deviation of MA, TakeProfit")
+
+deviationLineSupportColor    = input.color(color.rgb(0, 187, 212, 50), title="Deviation Above", inline="M2", group="Deviation of MA, TakeProfit")
+deviationLineResistanceColor = input.color(color.rgb(223, 64, 251, 50), title="Below", inline="M2", group="Deviation of MA, TakeProfit")
+deviationLinewidth           = input.int(1, title="Width", inline="M2", group="Deviation of MA, TakeProfit")
+
+combinedMaOff               = input.bool(true, title= "Show  Baseline of Deviation")
+showdev                     = input.bool(true, 'Show Deviation lines')
+
+Perc2                       = input.float(0.1, title='lot 2 level', step=0.1, inline="M3", group="Take profit level")
+Perc3                       = input.float(0.1, title='lot 3 level', step=0.1, inline="M3", group="Take profit level")
+Perc4                       = input.float(0.1, title='lot 4 level', step=0.1, inline="M4", group="Take profit level")
+Perc5                       = input.float(0.1, title='lot 5 level', step=0.1, inline="M4", group="Take profit level")
+Perc6                       = input.float(0.1, title='lot 6 level', step=0.1, inline="M5", group="Take profit level")
+Perc10                      = input.float(0.1, title='lot 10 level', step=0.1, inline="M5", group="Take profit level")
+
+partial_profits             = input.bool(true, "partial profits", tooltip=t9)
+
+StopLossPerc                = input.float(4, title="Stop Loss (%)", minval=0.00, step=0.01 , group="STOP LOSS" ) * 0.01
+Strategypositionclose       = strategy.closedtrades.exit_price(strategy.closedtrades - 1)
+Strategyposition            = strategy.opentrades.entry_price(0)
+longStopPrice               = strategy.opentrades.entry_price(0) * (1 + StopLossPerc)
+TakeProfit                  = strategy.opentrades.entry_price(0) * (1 - percentDeviation)
+
+
+n_open                      = input(0, title= "delay number of bars to open condition")
+n_close                     = input(0, title= "delay number of bars to close condition")
+
+
+showadx                     = input.bool(false, 'active ADX filter', inline="M5", group="ADX filter")
+adx_value                   = input.float(27,  title='ADX value filter', inline="M6", group="ADX filter")
+lenadx                      = input(9,  inline="M7", group="ADX filter")
+//th                        = input(20,  inline="M7", group="ADX filter")
+
+show_andean                 = input.bool(false, 'active Andean filter', inline="M5", group="Andean filter")
+length_andean               = input(95 ,  title='length andean')
+Val_bearish                 = input(300, 'Value Bearish filter' ,tooltip=t8)
+sig_length                  = 9
+
+
+//-------------
+
+up                          = ta.rma(math.max(ta.change(close), 0), Length)
+down                        = ta.rma(-math.min(ta.change(close), 0), Length)
+rsi                         = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+mf                          = ta.mfi(hlc3, Length)
+rsi_mfi                     = math.avg(rsi,mf)
+
+
+getMA3(src3, length3) =>
+    ma = 0.0
+    if mav3 == 'SMA'
+        ma := ta.sma(src3, length3)
+        ma
+
+    if mav3 == 'EMA'
+        ma := ta.ema(src3, length3)
+        ma
+
+    if mav3 == 'WMA'
+        ma := ta.wma(src3, length3)
+        ma
+
+    if mav3 == 'TMA'
+        ma := ta.sma(ta.sma(src3, math.ceil(length3 / 2)), math.floor(length3 / 2) + 1)
+        ma
+
+    if mav3 == 'VWMA'
+        ma := ta.vwma(src3, length3)
+        ma
+
+    if mav3 == 'VWAP'
+        ma := ta.vwap(src3)
+        ma
+
+    if mav3 == 'HMA'
+        ma := ta.hma(src3, length3)
+        ma
+        
+    if mav3 == 'ALMA'
+        ma := ta.alma(src3, Length, 0.7, 6)
+        ma
+
+    if mav3 == "SUPERTREND"
+        ma := (ta.vwma (src3 , 100) + ta.vwma (src3, 500) + ta.vwma (src3, 1000) + ta.vwap ( src3)) / 4
+        ma
+
+    if mav3 == "SUPERTREND1"
+        ma := (ta.vwma (src3 , 100) + ta.vwma (src3, 500)  + ta.vwap ( src3)) / 3
+        ma
+
+    if mav3 == "SUPERTREND2"
+        ma := (ta.vwma (src3 , 100) +  ta.vwap ( src3)) / 2
+        ma
+
+    if mav3 == "SUPERTREND EX"
+        ma := (ta.vwma(src3, 5) + ta.vwma(src3, 10) + ta.vwma(src3, 20) + ta.vwma(src3, 50) + ta.wma(src3, 5) + ta.wma(src3, 10) + ta.wma(src3, 20) + ta.wma(src3, 50)) / 8
+        ma
+
+    if mav3 == "SUPERTREND EX"
+        ma := (ta.vwma ( src3,1009) + ta.hma(src3,501)+ ta.vwap(src3)) / 3
+        ma
+
+    if mav3 == "PERCT"
+        ma := TakeProfit
+        ma
+
+
+    ma
+
+
+combinedMa = getMA3(src3, length3)
+showdev_display = showdev == true ? display.all : display.none
+
+
+
+//------------------- }
+
+bool p_mom                          = rsi_mfi[1] < pmom and
+      rsi_mfi > pmom and
+      rsi_mfi > nmom and
+       ta.change(ta.ema(close,5)) > 0
+
+bool n_mom                          = rsi_mfi < nmom and
+      ta.change(ta.ema(close,5)) < 0
+
+// //  ---> Momentums ------------- {
+
+if p_mom
+    positive:= true
+    negative:= false
+
+if n_mom
+    positive:= false
+    negative:= true     
+
+
+
+//
+method _Band(int len)=>
+    math.min (ta.atr (len) * 0.3, close * (0.3/100)) [20] /2 * 8 
+
+
+Band = _Band(30) 
+
+
+method rangeMA(float Range,Prd)=>
+    weight = Range / math.sum(Range, Prd)
+    sum = math.sum(close * weight, Prd)
+    tw= math.sum(weight, Prd)
+    sum / tw
+
+
+
+
+
+
+// Calculate the RWMA
+
+rwma = rangeMA(BarRange,20)
+
+// Plotting the RWMA.
+colour = positive ? bullc : bearc
+RWMA = positive ? (rwma - Band) : negative ? (rwma + Band) : na
+alpha = color.new(color.black, 100)
+
+center = plot(filleshow ? RWMA : na, "RRTH", colour, editable = true)
+plot(filleshow ? RWMA : na, "RRTH", color.new(colour, 70), 2, editable = true)
+plot(filleshow ? RWMA : na, "RRTH", color.new(colour, 80), 3, editable = true)
+plot(filleshow ? RWMA : na, "RRTH", color.new(colour, 90), 4, editable = true)
+
+max = (RWMA + Band) 
+min = (RWMA - Band) 
+
+top = plot(filleshow ? max: na, "RRTH", alpha)
+bottom = plot(filleshow ? min: na, "RRTH", alpha)
+fill(top, center, top_value =  max, bottom_value = RWMA, bottom_color = color.new(colour, 75), top_color = alpha, editable = true)
+fill(center, bottom, top_value =  RWMA, bottom_value = min, bottom_color = alpha, top_color = color.new(colour, 75), editable = true)
+Barcol = positive ? color.green:color.red
+
+if negative and not negative[1]
+    label.new(bar_index,max+(Band/2),"",color = color.red,size=size.small)
+if positive and not positive[1]
+    label.new(bar_index,min-(Band/2),"",color = color.green,size=size.small,style= label.style_label_up)
+
+plotcandle(open, high, low, close,color = Barcol,wickcolor = Barcol,bordercolor  = Barcol)
+barcolor(color = Barcol)
+
+
+// SPOT Trading Alerts
+//alertcondition(positive and not positive[1],"BUY")
+//alertcondition(negative and not negative[1],"SELL")
+
+
+//Percentage Deviation Calculations------------------- }
+
+combinedMa1Up = combinedMa * (1 + percentDeviation) 
+combinedMa2Up = combinedMa * (1 + (percentDeviation*2)) 
+combinedMa3Up = combinedMa * (1 + (percentDeviation*3)) 
+combinedMa4Up = combinedMa * (1 + (percentDeviation*4)) 
+combinedMa5Up = combinedMa * (1 + (percentDeviation*5)) 
+combinedMa6Up = combinedMa * (1 + (percentDeviation*6)) 
+combinedMa7Up = combinedMa * (1 + (percentDeviation*7)) 
+combinedMa8Up = combinedMa * (1 + (percentDeviation*8)) 
+combinedMa9Up = combinedMa * (1 + (percentDeviation*9)) 
+combinedMa10Up = combinedMa * (1 + (percentDeviation*10)) 
+
+combinedMa1Down = combinedMa * (1 - percentDeviation) 
+combinedMa2Down = combinedMa * (1 - (percentDeviation*2)) 
+combinedMa3Down = combinedMa * (1 - (percentDeviation*3)) 
+combinedMa4Down = combinedMa * (1 - (percentDeviation*4)) 
+combinedMa5Down = combinedMa * (1 - (percentDeviation*5)) 
+combinedMa6Down = combinedMa * (1 - (percentDeviation*6)) 
+combinedMa7Down = combinedMa * (1 - (percentDeviation*7)) 
+combinedMa8Down = combinedMa * (1 - (percentDeviation*8)) 
+combinedMa9Down = combinedMa * (1 - (percentDeviation*9)) 
+combinedMa10Down = combinedMa * (1 - (percentDeviation*10))
+
+
+//Plot Deviation------------------- }
+
+    // Trailing Stop conditions--------------------}
+
+var upc1=0
+var upc2=0
+var upc3=0
+var upc4=0
+
+if strategy.opentrades.entry_price(strategy.opentrades - 1)  > 0 and close[1]  < combinedMa
+    upc1 := 2
+
+if  close[1]  < combinedMa2Down
+    upc2 := 2
+
+if close[1] < combinedMa4Down
+    upc3 := 2
+
+if close[1] < combinedMa6Down
+    upc4 := 2
+
+if (positive and not positive[1])[1]
+    upc1:= 0 
+    upc2:= 0
+    upc3:= 0
+    upc4:= 0
+
+
+plot(combinedMaOff ?  combinedMa : na , color=close > combinedMa ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=4, title="Baseline of deviation")
+
+longStopPricenew = upc4 == 2 ? combinedMa4Down : upc3 == 2 ? combinedMa2Down :  upc2==2 ? combinedMa : upc1==2 ? Strategyposition *(1.000) : longStopPrice 
+
+plot(Strategyposition  > 0 ? longStopPricenew : na, color=color.rgb(255, 0, 0, 23), style=plot.style_linebr, linewidth=8, title="Stop Loss")
+
+plot(Strategyposition  > 0 and partial_profits and Perc2 > 0 and low > combinedMa2Down ? combinedMa2Down : na, color=color.rgb(0, 166, 255, 23), style=plot.style_cross, linewidth=2, title="Stop Loss 2")
+
+plot(Strategyposition  > 0 and partial_profits and Perc3 > 0 and low > combinedMa3Down ? combinedMa3Down : na, color=color.rgb(0, 166, 255, 23), style=plot.style_cross, linewidth=2, title="Stop Loss 3")
+
+plot(Strategyposition  > 0 and partial_profits and Perc4 > 0 and low > combinedMa4Down ? combinedMa4Down : na, color=color.rgb(0, 166, 255, 23), style=plot.style_cross, linewidth=2, title="Stop Loss 4")
+
+plot(Strategyposition  > 0 and partial_profits and Perc5 > 0 and low > combinedMa5Down ? combinedMa5Down : na, color=color.rgb(0, 166, 255, 23), style=plot.style_cross, linewidth=2, title="Stop Loss 5")
+
+plot(Strategyposition  > 0 and partial_profits and Perc6 > 0 and low > combinedMa6Down ? combinedMa6Down : na, color=color.rgb(0, 166, 255, 23), style=plot.style_cross, linewidth=2, title="Stop Loss 6")
+
+plot(Strategyposition  > 0 and partial_profits and Perc10 > 0 and low > combinedMa10Down ? combinedMa10Down : na, color=color.rgb(0, 166, 255, 23), style=plot.style_cross, linewidth=2, title="Stop Loss 10")
+
+
+
+
+plot(combinedMa1Up ,  title="Up 1 Deviation", color=close > combinedMa1Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa2Up ,  title="Up 2 Deviation", color=close > combinedMa2Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa3Up ,  title="Up 3 Deviation", color=close > combinedMa3Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa4Up ,  title="Up 4 Deviation", color=close > combinedMa4Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+//plot(combinedMa5Up ,  title="Up 5 Deviation", color=close > combinedMa5Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+//plot(combinedMa6Up ,  title="Up 6 Deviation", color=close > combinedMa6Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+//plot(combinedMa7Up ,  title="Up 7 Deviation", color=close > combinedMa7Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+//plot(combinedMa8Up ,  title="Up 8 Deviation", color=close > combinedMa8Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+//plot(combinedMa9Up ,  title="Up 9 Deviation", color=close > combinedMa9Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+//plot(combinedMa10Up , title="Up 10 Deviation", color=close > combinedMa10Up ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+
+plot(combinedMa1Down , title="Down 1 Deviation", color=close > combinedMa1Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa2Down , title="Down 2 Deviation", color=close > combinedMa2Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa3Down , title="Down 3 Deviation", color=close > combinedMa3Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa4Down , title="Down 4 Deviation", color=close > combinedMa4Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa5Down , title="Down 5 Deviation", color=close > combinedMa5Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa6Down , title="Down 6 Deviation", color=close > combinedMa6Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa7Down , title="Down 7 Deviation", color=close > combinedMa7Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa8Down , title="Down 8 Deviation", color=close > combinedMa8Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa9Down , title="Down 9 Deviation", color=close > combinedMa9Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+plot(combinedMa10Down, title="Down 10 Deviation", color=close > combinedMa10Down ? deviationLineSupportColor : deviationLineResistanceColor, linewidth=deviationLinewidth, display = showdev_display)
+
+
+//Signals buy bear------------------- }
+
+bull1 = (low < (combinedMa * (1 - (percentDeviation*1))))
+bear1 = (high > (combinedMa * (1 + (percentDeviation*1))))
+
+bull2 = (low < (combinedMa * (1 - (percentDeviation*2))))
+bear2 = (high > (combinedMa * (1 + (percentDeviation*2))))
+
+bull3 = (low < (combinedMa * (1 - (percentDeviation*3))))
+bear3 = (high > (combinedMa * (1 + (percentDeviation*3))))
+
+bull4 = (low < (combinedMa * (1 - (percentDeviation*4))))
+bear4 = (high > (combinedMa * (1 + (percentDeviation*4))))
+
+bull5 = (low < (combinedMa * (1 - (percentDeviation*5))) )
+bear5 = (high > (combinedMa * (1 + (percentDeviation*5))) )
+
+bull6 = (low < (combinedMa * (1 - (percentDeviation*6))) )
+bear6 = (high > (combinedMa * (1 + (percentDeviation*6))) )
+
+bull10 = (low < (combinedMa * (1 - (percentDeviation*10))) )
+bear10= (high > (combinedMa * (1 + (percentDeviation*10))) )
+
+bull14 = (low < (combinedMa * (1 - (percentDeviation*14))) )
+bear14= (high > (combinedMa * (1 + (percentDeviation*14))) )
+
+//ADX filter-------------------
+
+TrueRange = math.max(math.max(high - low, math.abs(high - nz(close[1]))), math.abs(low - nz(close[1])))
+DirectionalMovementPlus = high - nz(high[1]) > nz(low[1]) - low ? math.max(high - nz(high[1]), 0) : 0
+DirectionalMovementMinus = nz(low[1]) - low > high - nz(high[1]) ? math.max(nz(low[1]) - low, 0) : 0
+
+SmoothedTrueRange = 0.0
+SmoothedTrueRange := nz(SmoothedTrueRange[1]) - nz(SmoothedTrueRange[1]) / lenadx + TrueRange
+
+SmoothedDirectionalMovementPlus = 0.0
+SmoothedDirectionalMovementPlus := nz(SmoothedDirectionalMovementPlus[1]) - nz(SmoothedDirectionalMovementPlus[1]) / lenadx + DirectionalMovementPlus
+
+SmoothedDirectionalMovementMinus = 0.0
+SmoothedDirectionalMovementMinus := nz(SmoothedDirectionalMovementMinus[1]) - nz(SmoothedDirectionalMovementMinus[1]) / lenadx + DirectionalMovementMinus
+
+DIPlus = SmoothedDirectionalMovementPlus / SmoothedTrueRange * 100
+DIMinus = SmoothedDirectionalMovementMinus / SmoothedTrueRange * 100
+DX = math.abs(DIPlus - DIMinus) / (DIPlus + DIMinus) * 100
+ADX = ta.sma(DX, lenadx)
+
+// Andean Filter--------------
+
+var alpha1 = 2/(length_andean +1)
+
+var up1 = 0.,var up2 = 0.
+var dn1 = 0.,var dn2 = 0.
+
+C = close
+O = open
+
+up1 := nz(math.max(C, O, up1[1] - (up1[1] - C) * alpha1), C)
+up2 := nz(math.max(C * C, O * O, up2[1] - (up2[1] - C * C) * alpha1), C * C)
+
+dn1 := nz(math.min(C, O, dn1[1] + (C - dn1[1]) * alpha1), C)
+dn2 := nz(math.min(C * C, O * O, dn2[1] + (C * C - dn2[1]) * alpha1), C * C)
+
+//Components
+bull_andean = math.sqrt(dn2 - dn1 * dn1)
+bear_andean = math.sqrt(up2 - up1 * up1)
+signal = ta.ema(math.max(bull_andean, bear_andean), sig_length)
+
+
+
+
+// Crossover conditions------------------- }
+
+showadx_display   = showadx == true ?   (ADX > adx_value) : negative and not negative[1]
+show_andean_display = show_andean == true ? (bear_andean < Val_bearish) : negative and not negative[1]
+
+
+//longCondition = positive and not positive[1] and showadx_display and show_andean_display
+//shortCondition = negative and not negative[1]
+
+openCondition = negative and not negative[1] and showadx_display and show_andean_display
+closeCondition = positive and not positive[1]
+
+cierreP2 = bull2
+cierreP3 = bull3
+cierreP4 = bull4
+cierreP5= bull5
+cierreP6 = bull6
+cierreP10 = bull10
+cierreP14 = bull14
+
+
+// trade conditions------------------- }
+
+if (openCondition)[n_open]
+    strategy.entry("short2", strategy.short, qty=Perc2)
+    strategy.entry("short3", strategy.short, qty=Perc3)
+    strategy.entry("short4", strategy.short, qty=Perc4)
+    strategy.entry("short5", strategy.short, qty=Perc5)
+    strategy.entry("short6", strategy.short, qty=Perc6)
+    strategy.entry("short10", strategy.short, qty=Perc10)
+
+if (cierreP2) and partial_profits 
+    strategy.close( "short2")
+
+if (cierreP3) and partial_profits 
+    strategy.close( "short3")
+
+if (cierreP4) and partial_profits 
+    strategy.close( "short4")
+
+if (cierreP5) and partial_profits 
+    strategy.close( "short5")
+
+if (cierreP6) and partial_profits 
+    strategy.close( "short6")
+
+if (cierreP10) and partial_profits 
+    strategy.close( "short10")
+
+if (closeCondition)[n_close] or ta.crossover(close[1] , longStopPricenew) 
+    strategy.close_all()
